@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>阿柯の预设提取器</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, sans-serif; padding: 15px; background: #f0f0f5; margin: 0; }
+  .box { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 600px; margin: 0 auto; }
+  h3 { margin-top: 0; color: #333; text-align: center; }
+  .subtitle { font-size: 13px; color: #999; text-align: center; margin-bottom: 15px; }
+  input[type=file] { width: 100%; margin: 15px 0; font-size: 15px; }
+  .btn { display: none; color: white; border: none; width: 100%; padding: 14px; border-radius: 10px; font-size: 16px; font-weight: bold; margin-top: 10px; cursor: pointer; }
+  .btn-struct { background: #34C759; }
+  .btn-download { background: #007AFF; }
+  .btn:active { opacity: 0.7; }
+  #status { font-size: 13px; color: #666; margin-top: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+  .key-list { background: #f8f8fc; border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 12px; color: #555; max-height: 200px; overflow-y: auto; display: none; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h3>🔧 阿柯の预设提取器</h3>
+  <p class="subtitle">不管JSON结构长什么样，把里面所有文字都给你挖出来</p>
+
+  <input type="file" id="fileInput" accept=".json">
+  <div id="status">👉 选择你的 JSON 文件</div>
+  <div id="keyList" class="key-list"></div>
+
+  <button id="btnStruct" class="btn btn-struct" onclick="downloadStruct()">🔍 先看看：下载JSON结构地图</button>
+  <button id="btnFull" class="btn btn-download" onclick="downloadFull()">📥 全部提取：下载完整文本</button>
+</div>
+
+<script>
+let fullText = "";
+let structText = "";
+let baseFileName = ""; 
+
+// 递归遍历JSON，提取所有文本
+function extractAll(obj, path, output) {
+  if (obj === null || obj === undefined) return;
+
+  if (typeof obj === 'string') {
+    if (obj.trim().length > 0) {
+      output.push({ path: path, value: obj });
+    }
+    return;
+  }
+
+  if (Array.isArray(obj)) {
+    obj.forEach((item, i) => {
+      extractAll(item, path + '[' + i + ']', output);
+    });
+    return;
+  }
+
+  if (typeof obj === 'object') {
+    Object.keys(obj).forEach(key => {
+      extractAll(obj[key], path ? path + ' → ' + key : key, output);
+    });
+  }
+}
+
+// 生成结构地图（只显示key和类型，不显示具体内容）
+function mapStructure(obj, indent) {
+  let result = "";
+  if (obj === null) return indent + "(null)\n";
+  if (typeof obj !== 'object') return "";
+
+  if (Array.isArray(obj)) {
+    result += indent + "[数组，共 " + obj.length + " 项]\n";
+    if (obj.length > 0) {
+      result += indent + "  第0项的结构：\n";
+      result += mapStructure(obj[0], indent + "    ");
+    }
+    return result;
+  }
+
+  Object.keys(obj).forEach(key => {
+    let val = obj[key];
+    let type = Array.isArray(val) ? "数组[" + val.length + "]"
+             : val === null ? "null"
+             : typeof val === 'object' ? "对象{}"
+             : typeof val === 'string' ? "文本(" + val.length + "字)"
+             : typeof val;
+    result += indent + '📁 ' + key + '  →  ' + type + '\n';
+    if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+      result += mapStructure(val, indent + "    ");
+    }
+    if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object') {
+      result += indent + "    第0项结构：\n";
+      result += mapStructure(val[0], indent + "        ");
+    }
+  });
+  return result;
+}
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // 读取原文件名（防呆处理：防止变成 xxx.json.txt）
+  baseFileName = file.name.replace(/\.[^/.]+$/, "");
+
+  document.getElementById('status').textContent = "⏳ 正在解析 " + file.name + " ...";
+  document.getElementById('btnStruct').style.display = 'none';
+  document.getElementById('btnFull').style.display = 'none';
+  document.getElementById('keyList').style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    try {
+      const data = JSON.parse(event.target.result);
+
+      // 生成结构地图
+      structText = "==== JSON 结构地图 ====\n";
+      structText += "文件: " + file.name + "\n\n";
+      structText += mapStructure(data, "");
+
+      // 提取所有文本
+      let entries = [];
+      extractAll(data, "", entries);
+
+      // 显示顶层key
+      let topKeys = Object.keys(data);
+      let keyListEl = document.getElementById('keyList');
+      keyListEl.innerHTML = "<b>顶层结构：</b><br>" + topKeys.map(k => {
+        let v = data[k];
+        let t = Array.isArray(v) ? "数组["+v.length+"]" : typeof v;
+        return '• ' + k + ' (' + t + ')';
+      }).join('<br>');
+      keyListEl.style.display = 'block';
+
+      // 生成完整文本
+      fullText = "==== 预设完整文本提取 ====\n";
+      fullText += "文件: " + file.name + "\n";
+      fullText += "提取到 " + entries.length + " 条文本内容\n";
+      fullText += "总字符数: " + entries.reduce((s,e) => s + e.value.length, 0) + "\n\n";
+
+      entries.forEach((entry, i) => {
+        fullText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+        fullText += "📍 位置: " + entry.path + "\n";
+        fullText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+        fullText += entry.value + "\n\n";
+      });
+
+      document.getElementById('status').textContent =
+        "✅ 解析成功！\n" +
+        "📊 顶层有 " + topKeys.length + " 个字段\n" +
+        "📝 共提取到 " + entries.length + " 条文本\n" +
+        "📏 总字符: " + entries.reduce((s,e) => s + e.value.length, 0) + "\n\n" +
+        "⬇️ 点下面按钮下载";
+
+      document.getElementById('btnStruct').style.display = 'block';
+      document.getElementById('btnFull').style.display = 'block';
+
+    } catch(err) {
+      document.getElementById('status').textContent = "❌ 解析失败: " + err.message;
+    }
+  };
+  reader.readAsText(file);
+});
+
+function downloadStruct() {
+  download(structText, baseFileName + "_JSON结构地图.txt");
+}
+
+function downloadFull() {
+  // 直接保存为：原文件名.txt
+  download(fullText, baseFileName + ".txt");
+}
+
+function download(text, filename) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
